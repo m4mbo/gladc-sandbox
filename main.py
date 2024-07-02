@@ -165,9 +165,10 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
 
     
 if __name__ == '__main__':
+
     args = arg_parse()
     DS = args.DS
-    setup_seed(args.seed)
+    setup_seed(args.seed)   
     a=0
     b=0
 
@@ -177,15 +178,17 @@ if __name__ == '__main__':
         max_nodes_num = max([G.number_of_nodes() for G in graphs])
     else:
         max_nodes_num = args.max_nodes
-    print(datanum)
+
+    print("Graphs in current dataset:", datanum)
+
     graphs_label = [graph.graph['label'] for graph in graphs]
     for graph in graphs:
         if graph.graph['label'] == 0:
             a=a+1
         else:
             b=b+1
-    print(a,b,'!!!!!!!!!!!!!!!!!!!!!!')
-    
+
+    print("Normal vs abnormal graphs:",a,b)
     
     kfd=StratifiedKFold(n_splits=5, random_state=args.seed, shuffle = True)
     result_auc=[]
@@ -193,17 +196,22 @@ if __name__ == '__main__':
         
         graphs_train_ = [graphs[i] for i in train_index]
         graphs_test = [graphs[i] for i in test_index]
-       
+
+        print("")
+
+        print(f"Fold {k} (train-test split):", len(train_index), len(test_index))
+
         graphs_train = []
         for graph in graphs_train_:
             if graph.graph['label'] != 0:
                 graphs_train.append(graph)
         
-
         num_train = len(graphs_train)
         num_test = len(graphs_test)
-        print(num_train, num_test)
-        
+
+        print(f"Fold {k} (train-test split after abnormal removal):", num_train, num_test)
+        print("")
+
         dataset_sampler_train = GraphBuild(graphs_train, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
     
         NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()

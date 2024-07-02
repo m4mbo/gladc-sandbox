@@ -4,6 +4,7 @@ import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 import torch
+
 def node_iter(G):
     if float(nx.__version__)<2.0:
         return G.nodes()
