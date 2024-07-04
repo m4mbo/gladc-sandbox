@@ -67,7 +67,7 @@ class Encoder1(nn.Module):
             if isinstance(m, GraphConv):
                 m.weight.data = init.kaiming_uniform_(m.weight.data, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
-                    m.bias.data = init.constant(m.bias.data, 0.0)
+                    m.bias.data = init.constant_(m.bias.data, 0.0)
 
     def build_conv_layers(self, input_dim, hidden_dim, embedding_dim, num_layers, add_self,
             normalize=False, dropout=0.0):
@@ -88,9 +88,6 @@ class Encoder1(nn.Module):
         return bn_module(x)
 
     def gcn_forward(self, x, adj, conv_first, conv_block, conv_last, embedding_mask=None):
-
-
-
 
         x = conv_first(x, adj)
         x = self.act(x)#relu
@@ -173,7 +170,7 @@ class Att_Decoder(nn.Module):
             if isinstance(m, GraphConv):
                 m.weight.data = init.kaiming_uniform_(m.weight.data, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
-                    m.bias.data = init.constant(m.bias.data, 0.0)
+                    m.bias.data = init.constant_(m.bias.data, 0.0)
 
     def build_conv_layers(self, input_dim, hidden_dim, embedding_dim, num_layers, add_self,
             normalize=False, dropout=0.0):

@@ -57,6 +57,9 @@ def setup_seed(seed):
      torch.backends.cudnn.deterministic = True
         
 def gen_ran_output(h0, adj, model, vice_model):
+
+    # Adding noise to every parameter of vice_model except proj_head
+
     for (adv_name,adv_param), (name,param) in zip(vice_model.named_parameters(), model.named_parameters()):
         if name.split('.')[0] == 'proj_head':
             adv_param.data = param.data
@@ -145,19 +148,21 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
 
             fpr_ab, tpr_ab, _ = roc_curve(y, label_test)
             test_roc_ab = auc(fpr_ab, tpr_ab)   
-            print('semi-supervised abnormal detection: auroc_ab: {}'.format(test_roc_ab))
+            print('Epoch {} semi-supervised abnormal detection, auroc_ab: {}'.format(epoch+1, test_roc_ab))
             if test_roc_ab>auroc_final:
                 auroc_final=test_roc_ab
             max_AUC= auroc_final 
-        #if epoch == (args.num_epochs-1):
-            #auroc_final =  test_roc_ab
-            print(max_AUC)
+    
+    return max_AUC
     
 if __name__ == '__main__':
+
     args = arg_parse()
     DS = args.DS
     setup_seed(args.seed)
 
+    # Taking data as it is (with its previously defined split)
+    # No fold procedure as in 'main_py'
     graphs_train_ = load_data.read_graphfile(args.datadir, args.DS+'_training', max_nodes=args.max_nodes)  
     graphs_test = load_data.read_graphfile(args.datadir, args.DS+'_testing', max_nodes=args.max_nodes)  
     datanum = len(graphs_train_) + len(graphs_test)    
@@ -169,66 +174,87 @@ if __name__ == '__main__':
     else:
         max_nodes_num = args.max_nodes
         
-    print(datanum)
+    print("Number of graphs:",datanum)
+    print("")
     
+    num_trials = 5
+    max_aurocs = []
 
-    
-    
-    train_num=len(graphs_train_)
-    all_idx = [idx for idx in range(train_num)]
-    shuffle(all_idx)
-    num_train=math.ceil(1*train_num)
-    train_index = all_idx[:num_train]
-    graphs_train_1 = [graphs_train_[i] for i in train_index]
-    graphs_train = []
-    for graph in graphs_train_1:
-        if graph.graph['label'] == 0:
-            graphs_train.append(graph)
-    for graph in graphs_train:
-        graph.graph['label'] = 0
-            
-    graphs_test_nor = []
-    graphs_test_ab = []
-    for graph in graphs_test:
-        if graph.graph['label'] == 0:
-            graphs_test_nor.append(graph)
-        else:
-            graphs_test_ab.append(graph)
-    for graph in graphs_test_nor:
-        graph.graph['label'] = 0
-    for graph in graphs_test_ab:
-        graph.graph['label'] = 1
-        graphs_test_nor.append(graph)
-    graphs_test = graphs_test_nor
+    # 5 trials according to paper
+    for i in range(num_trials):
+
+        print("Trial {}:".format(i+1))   
+
+        train_num=len(graphs_train_)
+        all_idx = [idx for idx in range(train_num)]
+        shuffle(all_idx)
+        num_train=math.ceil(1*train_num)
+        train_index = all_idx[:num_train]
+        graphs_train_1 = [graphs_train_[i] for i in train_index]
+        graphs_train = []
+
+        # Taking abnormals out of training set
+
+        for graph in graphs_train_1:
+            if graph.graph['label'] == 0:
+                graphs_train.append(graph)
+        for graph in graphs_train:
+            graph.graph['label'] = 0    # Not sure why
                 
-    num_train = len(graphs_train)
-    num_test = len(graphs_test)
-    print(num_train, num_test)
+        graphs_test_nor = []
+        graphs_test_ab = []
 
-        
-    dataset_sampler_train = GraphBuild(graphs_train, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
-    
-    NetG= NetGe1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
+        # Not sure why
+
+        for graph in graphs_test:
+            if graph.graph['label'] == 0:
+                graphs_test_nor.append(graph)
+            else:
+                graphs_test_ab.append(graph)
+        for graph in graphs_test_nor:
+            graph.graph['label'] = 0
+        for graph in graphs_test_ab:
+            graph.graph['label'] = 1
+            graphs_test_nor.append(graph)
+        graphs_test = graphs_test_nor
+                    
+        num_train = len(graphs_train)
+        num_test = len(graphs_test)
+        print("Train-test split:", num_train, num_test)
+        print("")
+
+            
+        dataset_sampler_train = GraphBuild(graphs_train, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
+
+        NetG= NetGe1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
                 args.num_gc_layers, bn=args.bn, args=args).cuda()
 
    
-    noise_NetG= Encoder1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
+        noise_NetG= Encoder1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
                 args.num_gc_layers, bn=args.bn, args=args).cuda()
+            
+        #NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
+        #noise_NetG= Encoder(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda() 
         
-    #NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
-    #noise_NetG= Encoder(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda() 
-    
-    data_train_loader = torch.utils.data.DataLoader(dataset_sampler_train, 
-                                                    shuffle=True,
-                                                    batch_size=args.batch_size)
+        data_train_loader = torch.utils.data.DataLoader(dataset_sampler_train, 
+                                                        shuffle=True,
+                                                        batch_size=args.batch_size)
 
+        
+        dataset_sampler_test = GraphBuild(graphs_test, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
+        data_test_loader = torch.utils.data.DataLoader(dataset_sampler_test, 
+                                                            shuffle=False,
+                                                            batch_size=1)
+        #train(data_train_loader, data_test_loader, model_teacher, model_student, args) 
+
+        result = train(data_train_loader, data_test_loader, NetG, noise_NetG,args)
+
+        print("Max AUC:", result)
+        print("")
+
+        max_aurocs.append(result)
     
-    dataset_sampler_test = GraphBuild(graphs_test, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
-    data_test_loader = torch.utils.data.DataLoader(dataset_sampler_test, 
-                                                        shuffle=False,
-                                                        batch_size=1)
-    #train(data_train_loader, data_test_loader, model_teacher, model_student, args)     
-    result = train(data_train_loader, data_test_loader, NetG, noise_NetG,args)
+    print('Average: {}, Std: {}'.format(np.mean(max_aurocs), np.std(max_aurocs)))
 
     
     

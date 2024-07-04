@@ -71,6 +71,9 @@ def lossT(T):
     return p
         
 def gen_ran_output(h0, adj, model, vice_model):
+
+    # Adding noise to every parameter of vice_model except proj_head
+
     for (adv_name,adv_param), (name,param) in zip(vice_model.named_parameters(), model.named_parameters()):
         if name.split('.')[0] == 'proj_head':
             adv_param.data = param.data
@@ -190,7 +193,7 @@ if __name__ == '__main__':
 
     print("Normal vs abnormal graphs:",a,b)
     
-    kfd=StratifiedKFold(n_splits=5, random_state=args.seed, shuffle = True)
+    kfd=StratifiedKFold(n_splits=5, random_state=args.seed, shuffle = True) # 5 fold
     result_auc=[]
     for k, (train_index,test_index) in enumerate(kfd.split(graphs, graphs_label)):
         
