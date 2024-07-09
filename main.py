@@ -28,6 +28,7 @@ from random import shuffle
 import math
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
+import matplotlib as plt
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='G-Anomaly Arguments.')
@@ -92,6 +93,13 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
     node_Feat=[]
     graph_Feat=[]
     max_AUC=0
+
+    # Logging losses
+    node_losses = []
+    graph_losses = []
+    encoder_losses = []
+    final_losses = []
+
     for epoch in range(args.num_epochs):
         total_time = 0
         total_lossG = 0.0
@@ -101,20 +109,40 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
             adj = Variable(data['adj'].float(), requires_grad=False).cuda()
             h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
             adj_label = Variable(data['adj_label'].float(), requires_grad=False).cuda()
+            
+            # x1_r -> node-level latent feature representation (array where each row corresponds to a node feature)
+            # Feat_0 -> graph-level latent representation 
+            # x1_r_1 -> randomized node-level latent representation
+            # Feat_0_1 -> randomized graph-level latent representation
+            # x_fake -> reconstructed node features
+            # s_fake -> reconstructed adjacency matrix
+            # x2 -> node-level latent feature representation of reconstructed feature array
+            # Feat_1 -> graph-level latent representation of reconstructed adjacency matrix
 
             x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
             x1_r_1 ,Feat_0_1= gen_ran_output(h0, adj, NetG.shared_encoder, noise_NetG)
             x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
 
-            
+            # 'err_g_con_s' and 'err_g_con_x' -> loss to measure how well the reconstruction matches the original 
+            # 'node_loss' -> mse of latent node-level feature representations
+            # 'graph_loss' -> mse of latent adjacency matrix representations
+            # err_g_enc -> contrastive loss (ensures that model can distinguish between different views of the graph)
+
             err_g_con_s, err_g_con_x = loss_func(adj_label, s_fake, h0, x_fake)
 
+            
             node_loss=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
-            graph_loss = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1).mean(dim=0)
-            err_g_enc=loss_cal(Feat_0_1, Feat_0)
+            node_losses.append(node_loss)
 
+            graph_loss = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1).mean(dim=0)
+            graph_losses.append(graph_loss)
+
+            err_g_enc=loss_cal(Feat_0_1, Feat_0)
+            encoder_losses.append(err_g_enc)
 
             lossG = err_g_con_s + err_g_con_x +node_loss+graph_loss +err_g_enc
+            final_losses.append(lossG)
+
             optimizerG.zero_grad()
             lossG.backward()
           
@@ -164,6 +192,7 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
             if test_roc_ab > max_AUC:
                 max_AUC=test_roc_ab
         auroc_final = max_AUC
+
     return auroc_final
 
     
@@ -174,7 +203,7 @@ if __name__ == '__main__':
     setup_seed(args.seed)   
     a=0
     b=0
-
+    
     graphs = load_data.read_graphfile(args.datadir, args.DS, max_nodes=args.max_nodes)  
     datanum = len(graphs)
     if args.max_nodes == 0:
@@ -216,7 +245,6 @@ if __name__ == '__main__':
         print("")
 
         dataset_sampler_train = GraphBuild(graphs_train, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
-    
         NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
         noise_NetG= Encoder(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
         
