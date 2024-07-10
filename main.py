@@ -28,7 +28,8 @@ from random import shuffle
 import math
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
-import matplotlib as plt
+import matplotlib.pyplot as plt
+from logger import LossTracker
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='G-Anomaly Arguments.')
@@ -84,25 +85,27 @@ def gen_ran_output(h0, adj, model, vice_model):
     return x1_r,Feat_0
 
 
-def train(dataset, data_test_loader, NetG, noise_NetG, args):    
+def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):    
     optimizerG = torch.optim.Adam(NetG.parameters(), lr=args.lr)
     epochs=[]
     auroc_final = 0
-    l_bce = nn.BCELoss()
-    l_enc = l2_loss
     node_Feat=[]
     graph_Feat=[]
     max_AUC=0
 
     # Logging losses
-    node_losses = []
-    graph_losses = []
-    encoder_losses = []
-    final_losses = []
+    reconstruction_loss = []
+    contrastive_loss = []
+    node_graph_loss = []
+    total_loss = []
 
     for epoch in range(args.num_epochs):
         total_time = 0
         total_lossG = 0.0
+        total_reconstruction_loss = 0.0
+        total_contrastive_loss = 0.0
+        total_node_graph_loss = 0.0
+
         NetG.train()
         for batch_idx, data in enumerate(dataset):           
             begin_time = time.time()
@@ -130,29 +133,32 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
 
             err_g_con_s, err_g_con_x = loss_func(adj_label, s_fake, h0, x_fake)
 
-            
             node_loss=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
-            node_losses.append(node_loss)
-
             graph_loss = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1).mean(dim=0)
-            graph_losses.append(graph_loss)
 
             err_g_enc=loss_cal(Feat_0_1, Feat_0)
-            encoder_losses.append(err_g_enc)
 
             lossG = err_g_con_s + err_g_con_x +node_loss+graph_loss +err_g_enc
-            final_losses.append(lossG)
 
             optimizerG.zero_grad()
             lossG.backward()
           
             optimizerG.step()
           
-            total_lossG += lossG
-            
+            total_lossG += lossG.item()
+            total_reconstruction_loss += (err_g_con_s + err_g_con_x).item()
+            total_contrastive_loss += err_g_enc.item()
+            total_node_graph_loss += (node_loss + graph_loss).item()
+                        
             elapsed = time.time() - begin_time
             total_time += elapsed
         
+        # Appending the losses
+        reconstruction_loss.append(total_reconstruction_loss / len(dataset))
+        contrastive_loss.append(total_contrastive_loss / len(dataset))
+        node_graph_loss.append(total_node_graph_loss / len(dataset))
+        total_loss.append(total_lossG / len(dataset))
+
         if (epoch+1)%10 == 0 and epoch > 0:
             epochs.append(epoch)
             NetG.eval()   
@@ -180,8 +186,7 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
                    y.append(1)
                else:
                    y.append(0) 
-    
-                              
+              
             label_test = []
             for loss_ in loss:
                label_test.append(loss_)
@@ -191,7 +196,10 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
             print('semi-supervised abnormal detection: auroc_ab: {}'.format(test_roc_ab))
             if test_roc_ab > max_AUC:
                 max_AUC=test_roc_ab
+
         auroc_final = max_AUC
+
+    loss_tracker.add_losses(reconstruction_loss, contrastive_loss, node_graph_loss, total_loss)
 
     return auroc_final
 
@@ -224,8 +232,11 @@ if __name__ == '__main__':
     
     kfd=StratifiedKFold(n_splits=5, random_state=args.seed, shuffle = True) # 5 fold
     result_auc=[]
+
+    loss_tracker = LossTracker()
+
     for k, (train_index,test_index) in enumerate(kfd.split(graphs, graphs_label)):
-        
+
         graphs_train_ = [graphs[i] for i in train_index]
         graphs_test = [graphs[i] for i in test_index]
 
@@ -257,13 +268,16 @@ if __name__ == '__main__':
         data_test_loader = torch.utils.data.DataLoader(dataset_sampler_test, 
                                                         shuffle=False,
                                                         batch_size=1)
-        result = train(data_train_loader, data_test_loader, NetG, noise_NetG,args)     
+        result = train(data_train_loader, data_test_loader, NetG, noise_NetG, args, loss_tracker)     
         result_auc.append(result)
             
     result_auc = np.array(result_auc)    
     auc_avg = np.mean(result_auc)
     auc_std = np.std(result_auc)
     print('auroc{}, average: {}, std: {}'.format(result_auc, auc_avg, auc_std))
+
+    loss_tracker.plot_losses()
+    loss_tracker.plot_final_losses()
     
     
     

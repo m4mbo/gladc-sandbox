@@ -46,9 +46,6 @@ class Encoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.batch=batch
     
-
-        
-
     def forward(self, x, adj):
         x = self.leaky_relu(self.gc1(torch.matmul(adj, x)))
 

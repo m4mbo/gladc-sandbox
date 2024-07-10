@@ -100,11 +100,11 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args):
 
             node_loss=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
             graph_loss = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1).mean(dim=0)
-            #err_g_enc=l_enc(Feat_0, Feat_1)
+            
             err_g_enc=loss_cal(Feat_0_1, Feat_0)
 
-
             lossG = err_g_con_s + err_g_con_x + graph_loss +node_loss+err_g_enc
+
             optimizerG.zero_grad()
             lossG.backward()
 
