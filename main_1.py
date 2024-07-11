@@ -28,6 +28,7 @@ from random import shuffle
 import math
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
+from logger import LossTracker
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='G-Anomaly Arguments.')
@@ -68,92 +69,131 @@ def gen_ran_output(h0, adj, model, vice_model):
     x1_r,Feat_0= vice_model(h0, adj)
     return x1_r,Feat_0
 
-def train(dataset, data_test_loader, NetG, noise_NetG, args):    
+def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):    
+    
     optimizerG = torch.optim.Adam(NetG.parameters(), lr=args.lr)
     epochs=[]
     auroc_final = 0
-    l_bce = nn.BCELoss()
-    #l_adv= l2_loss
-    l_enc = l2_loss
     node_Feat=[]
     graph_Feat=[]
     max_AUC=0
+
+    # Logging losses
+    reconstruction_loss = []
+    contrastive_loss = []
+    node_graph_loss = []
+    total_loss = []
+    test_loss = []
+
     for epoch in range(args.num_epochs):
         total_time = 0
         total_lossG = 0.0
+        total_reconstruction_loss = 0.0
+        total_contrastive_loss = 0.0
+        total_node_graph_loss = 0.0
+        total_test_loss = 0.0
+
         NetG.train()
         for batch_idx, data in enumerate(dataset):           
             begin_time = time.time()
             adj = Variable(data['adj'].float(), requires_grad=False).cuda()
-
             h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
             adj_label = Variable(data['adj_label'].float(), requires_grad=False).cuda()
-
+            
+            # x1_r -> node-level latent feature representation (array where each row corresponds to a node feature)
+            # Feat_0 -> graph-level latent representation 
+            # x1_r_1 -> randomized node-level latent representation
+            # Feat_0_1 -> randomized graph-level latent representation
+            # x_fake -> reconstructed node features
+            # s_fake -> reconstructed adjacency matrix
+            # x2 -> node-level latent feature representation of reconstructed feature array
+            # Feat_1 -> graph-level latent representation of reconstructed adjacency matrix
 
             x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
             x1_r_1 ,Feat_0_1= gen_ran_output(h0, adj, NetG.shared_encoder, noise_NetG)
-
             x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
 
-            
+            # 'err_g_con_s' and 'err_g_con_x' -> loss to measure how well the reconstruction matches the original 
+            # 'node_loss' -> mse of latent node-level feature representations
+            # 'graph_loss' -> mse of latent adjacency matrix representations
+            # err_g_enc -> contrastive loss (ensures that model can distinguish between different views of the graph)
+
             err_g_con_s, err_g_con_x = loss_func(adj_label, s_fake, h0, x_fake)
 
             node_loss=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
             graph_loss = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1).mean(dim=0)
-            
+
             err_g_enc=loss_cal(Feat_0_1, Feat_0)
 
-            lossG = err_g_con_s + err_g_con_x + graph_loss +node_loss+err_g_enc
+            lossG = err_g_con_s + err_g_con_x +node_loss+graph_loss +err_g_enc
 
             optimizerG.zero_grad()
             lossG.backward()
-
+          
             optimizerG.step()
-            total_lossG += lossG
+          
+            total_lossG += lossG.item()
+            total_reconstruction_loss += (err_g_con_s + err_g_con_x).item()
+            total_contrastive_loss += err_g_enc.item()
+            total_node_graph_loss += (node_loss + graph_loss).item()
+                        
             elapsed = time.time() - begin_time
             total_time += elapsed
-                   
+        
+        # Appending the losses
+        reconstruction_loss.append(total_reconstruction_loss / len(dataset))
+        contrastive_loss.append(total_contrastive_loss / len(dataset))
+        node_graph_loss.append(total_node_graph_loss / len(dataset))
+        total_loss.append(total_lossG / len(dataset))
+
         if (epoch+1)%10 == 0 and epoch > 0:
             epochs.append(epoch)
             NetG.eval()   
             loss = []
             y=[]
-            
+
             for batch_idx, data in enumerate(data_test_loader):
-               adj = Variable(data['adj'].float(), requires_grad=False).cuda()
-               h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
+                adj = Variable(data['adj'].float(), requires_grad=False).cuda()
+                h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
 
-               x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
-               x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
-
-               loss_node=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
-
-               loss_graph = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1)
-
-               loss_=loss_node+loss_graph
-
-               loss_ = np.array(loss_.cpu().detach())
-               
-               loss.append(loss_)
-
-               if data['label'] == 0:
-                   y.append(1)
-               else:
-                   y.append(0)
+                x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
             
+                x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
+                
+                loss_node=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
+
+                loss_graph = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1)
+                
+                loss_=loss_node+loss_graph
+
+                total_test_loss += loss_.item()    # Logging
+
+                loss_ = np.array(loss_.cpu().detach())
+                
+                loss.append(loss_)
+                if data['label'] == 0:
+                    y.append(1)
+                else:
+                    y.append(0)             
+
+            test_loss.append(total_test_loss / len(data_test_loader))
+
             label_test = []
             for loss_ in loss:
                label_test.append(loss_)
             label_test = np.array(label_test)
-
             fpr_ab, tpr_ab, _ = roc_curve(y, label_test)
             test_roc_ab = auc(fpr_ab, tpr_ab)   
-            print('Epoch {} semi-supervised abnormal detection, auroc_ab: {}'.format(epoch+1, test_roc_ab))
-            if test_roc_ab>auroc_final:
-                auroc_final=test_roc_ab
-            max_AUC= auroc_final 
-    
-    return max_AUC
+            print('semi-supervised abnormal detection: auroc_ab: {}'.format(test_roc_ab))
+            if test_roc_ab > max_AUC:
+                max_AUC=test_roc_ab
+
+        auroc_final = max_AUC
+
+    loss_tracker.add_train_losses(reconstruction_loss, contrastive_loss, node_graph_loss, total_loss)
+    loss_tracker.add_test_loss(test_loss)
+
+    return auroc_final
     
 if __name__ == '__main__':
 
@@ -179,6 +219,8 @@ if __name__ == '__main__':
     
     num_trials = 5
     max_aurocs = []
+
+    loss_tracker = LossTracker(DS)
 
     # 5 trials according to paper
     for i in range(num_trials):
@@ -247,7 +289,7 @@ if __name__ == '__main__':
                                                             batch_size=1)
         #train(data_train_loader, data_test_loader, model_teacher, model_student, args) 
 
-        result = train(data_train_loader, data_test_loader, NetG, noise_NetG,args)
+        result = train(data_train_loader, data_test_loader, NetG, noise_NetG, args, loss_tracker)
 
         print("Max AUC:", result)
         print("")
@@ -255,6 +297,8 @@ if __name__ == '__main__':
         max_aurocs.append(result)
     
     print('Average: {}, Std: {}'.format(np.mean(max_aurocs), np.std(max_aurocs)))
+    loss_tracker.plot_losses()
+    loss_tracker.plot_final_losses()
 
     
     

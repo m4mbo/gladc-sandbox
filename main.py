@@ -98,6 +98,7 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
     contrastive_loss = []
     node_graph_loss = []
     total_loss = []
+    test_loss = []
 
     for epoch in range(args.num_epochs):
         total_time = 0
@@ -105,6 +106,7 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
         total_reconstruction_loss = 0.0
         total_contrastive_loss = 0.0
         total_node_graph_loss = 0.0
+        total_test_loss = 0.0
 
         NetG.train()
         for batch_idx, data in enumerate(dataset):           
@@ -166,27 +168,31 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
             y=[]
 
             for batch_idx, data in enumerate(data_test_loader):
-               adj = Variable(data['adj'].float(), requires_grad=False).cuda()
-               h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
+                adj = Variable(data['adj'].float(), requires_grad=False).cuda()
+                h0 = Variable(data['feats'].float(), requires_grad=False).cuda()
 
-               x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
-         
-               x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
-               
-               loss_node=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
+                x1_r,Feat_0 = NetG.shared_encoder(h0, adj)
+            
+                x_fake,s_fake,x2,Feat_1=NetG(x1_r,adj)
+                
+                loss_node=torch.mean(F.mse_loss(x1_r, x2, reduction='none'), dim=2).mean(dim=1).mean(dim=0)
 
-               loss_graph = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1)
-            
-               loss_=loss_node+loss_graph
-            
-               loss_ = np.array(loss_.cpu().detach())
-               
-               loss.append(loss_)
-               if data['label'] == 0:
-                   y.append(1)
-               else:
-                   y.append(0) 
-              
+                loss_graph = F.mse_loss(Feat_0, Feat_1, reduction='none').mean(dim=1)
+                
+                loss_ = loss_node + loss_graph
+
+                total_test_loss += loss_.item()    # Logging
+
+                loss_ = np.array(loss_.cpu().detach())
+                
+                loss.append(loss_)
+                if data['label'] == 0:
+                    y.append(1)
+                else:
+                    y.append(0)             
+
+            test_loss.append(total_test_loss / len(data_test_loader))
+
             label_test = []
             for loss_ in loss:
                label_test.append(loss_)
@@ -199,7 +205,8 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
 
         auroc_final = max_AUC
 
-    loss_tracker.add_losses(reconstruction_loss, contrastive_loss, node_graph_loss, total_loss)
+    loss_tracker.add_train_losses(reconstruction_loss, contrastive_loss, node_graph_loss, total_loss)
+    loss_tracker.add_test_loss(test_loss)
 
     return auroc_final
 
@@ -233,7 +240,7 @@ if __name__ == '__main__':
     kfd=StratifiedKFold(n_splits=5, random_state=args.seed, shuffle = True) # 5 fold
     result_auc=[]
 
-    loss_tracker = LossTracker()
+    loss_tracker = LossTracker(DS)
 
     for k, (train_index,test_index) in enumerate(kfd.split(graphs, graphs_label)):
 
