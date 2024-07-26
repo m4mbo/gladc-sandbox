@@ -5,17 +5,16 @@ from sklearn.utils.random import sample_without_replacement
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 from sklearn.svm import OneClassSVM
 import argparse
-import load_data
+import data.load_data as load_data
 import networkx as nx
-from graph_autoencoder import *
+from models.graph_autoencoder import *
 import torch
 import torch.nn as nn
 import time
-import graph_autoencoder
 from loss import *
 from util import *
 from torch.autograd import Variable
-from GraphBuild import GraphBuild
+from data.graph_build import GraphBuild
 from numpy.random import seed
 import random
 import matplotlib.pyplot as plt
@@ -23,13 +22,12 @@ import copy
 import torch.nn.functional as F
 from sklearn.manifold import TSNE
 from matplotlib import cm
-from model import *
+from models.model import *
 from random import shuffle
-import math
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
 import matplotlib.pyplot as plt
-from logger import LossTracker
+from mb.logger import LossTracker
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='G-Anomaly Arguments.')
@@ -48,6 +46,8 @@ def arg_parse():
     parser.add_argument('--nobias', dest='bias', action='store_const', const=False, default=True, help='Whether to add bias. Default to True.')
     parser.add_argument('--feature', dest='feature', default='deg-num', help='use what node feature')
     parser.add_argument('--seed', dest='seed', type=int, default=1, help='seed')
+    parser.add_argument('--log', dest='log', action='store_const', const=True, default=False, help='Whether to log the loss. Default to False.')
+
     return parser.parse_args()
 
 def setup_seed(seed):
@@ -69,7 +69,6 @@ def lossT(T):
         q=q+a
     p=q / T.shape[0]
     
-            
     return p
         
 def gen_ran_output(h0, adj, model, vice_model):
@@ -140,8 +139,10 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
 
             err_g_enc=loss_cal(Feat_0_1, Feat_0)
 
-            lossG = err_g_con_s + err_g_con_x +node_loss+graph_loss +err_g_enc
-
+            # lossG = err_g_con_s + err_g_con_x + node_loss + graph_loss + err_g_enc
+            
+            lossG = err_g_con_s + err_g_con_x + graph_loss + node_loss
+            
             optimizerG.zero_grad()
             lossG.backward()
           
@@ -263,9 +264,16 @@ if __name__ == '__main__':
         print("")
 
         dataset_sampler_train = GraphBuild(graphs_train, features=args.feature, normalize=False, max_num_nodes=max_nodes_num)
-        NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
-        noise_NetG= Encoder(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
         
+        # NetG= NetGe(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
+        # noise_NetG= Encoder(dataset_sampler_train.feat_dim,args.hidden_dim, args.output_dim,args.dropout,args.batch_size).cuda()
+        
+        NetG= NetGe1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
+                args.num_gc_layers, bn=args.bn, args=args).cuda()
+
+   
+        noise_NetG= Encoder1(dataset_sampler_train.feat_dim, args.hidden_dim, args.output_dim, 2,
+                args.num_gc_layers, bn=args.bn, args=args).cuda()
         
         data_train_loader = torch.utils.data.DataLoader(dataset_sampler_train, 
                                                     shuffle=True,
@@ -283,8 +291,9 @@ if __name__ == '__main__':
     auc_std = np.std(result_auc)
     print('auroc{}, average: {}, std: {}'.format(result_auc, auc_avg, auc_std))
 
-    loss_tracker.plot_losses()
-    loss_tracker.plot_final_losses()
+    if args.log == True:
+        loss_tracker.plot_losses()
+        loss_tracker.plot_final_losses()
     
     
     

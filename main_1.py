@@ -5,17 +5,17 @@ from sklearn.utils.random import sample_without_replacement
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 from sklearn.svm import OneClassSVM
 import argparse
-import load_data
+import data.load_data as load_data
 import networkx as nx
-from graph_autoencoder import *
+from models.graph_autoencoder import *
 import torch
 import torch.nn as nn
 import time
-import graph_autoencoder
+import models.graph_autoencoder as graph_autoencoder
 from loss import *
 from util import *
 from torch.autograd import Variable
-from GraphBuild import GraphBuild
+from data.graph_build import GraphBuild
 from numpy.random import seed
 import random
 import matplotlib.pyplot as plt
@@ -23,12 +23,12 @@ import copy
 import torch.nn.functional as F
 from sklearn.manifold import TSNE
 from matplotlib import cm
-from model import *
+from models.model import *
 from random import shuffle
 import math
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
-from logger import LossTracker
+from mb.logger import LossTracker
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='G-Anomaly Arguments.')
@@ -125,7 +125,9 @@ def train(dataset, data_test_loader, NetG, noise_NetG, args, loss_tracker):
 
             err_g_enc=loss_cal(Feat_0_1, Feat_0)
 
-            lossG = err_g_con_s + err_g_con_x +node_loss+graph_loss +err_g_enc
+            # lossG = err_g_con_s + err_g_con_x + node_loss + graph_loss + err_g_enc
+            
+            lossG = err_g_con_s + err_g_con_x + graph_loss + node_loss
 
             optimizerG.zero_grad()
             lossG.backward()

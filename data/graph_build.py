@@ -28,9 +28,16 @@ class GraphBuild(torch.utils.data.Dataset):
             self.len_all.append(G.number_of_nodes())
             self.label_all.append(G.graph['label'])
             if features == 'default':
+
                 f = np.zeros((self.max_num_nodes, self.feat_dim), dtype=float)
                 for i,u in enumerate(G.nodes()):
                     f[i,:] = util.node_dict(G)[u]['feat']
+                    
+                # Node degree inclusion    
+                # f = np.zeros((self.max_num_nodes, self.feat_dim + 1), dtype=float)
+                # for i,u in enumerate(G.nodes()):
+                #     f[i, :-1] = util.node_dict(G)[u]['feat']
+                #     f[i, -1] = np.sum(adj[i, :])  # Node degree
                 self.feature_all.append(f)
             elif features == 'deg-num':
                 degs = np.sum(np.array(adj), 1)
