@@ -3,8 +3,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import scipy.sparse as sp
-from util import *
-import util
+from util.graph_processing import *
 
 class GraphBuild(torch.utils.data.Dataset):
     def __init__(self, G_list, features='default', normalize=True, assign_feat='default', max_num_nodes=0):
@@ -17,7 +16,7 @@ class GraphBuild(torch.utils.data.Dataset):
         self.max_num_nodes = max_num_nodes
 
         if features == 'default':
-            self.feat_dim = util.node_dict(G_list[0])[0]['feat'].shape[0]
+            self.feat_dim = node_dict(G_list[0])[0]['feat'].shape[0]
 
         for G in G_list:
             adj = np.array(nx.to_numpy_array(G))
@@ -31,7 +30,7 @@ class GraphBuild(torch.utils.data.Dataset):
 
                 f = np.zeros((self.max_num_nodes, self.feat_dim), dtype=float)
                 for i,u in enumerate(G.nodes()):
-                    f[i,:] = util.node_dict(G)[u]['feat']
+                    f[i,:] = node_dict(G)[u]['feat']
                     
                 # Node degree inclusion    
                 # f = np.zeros((self.max_num_nodes, self.feat_dim + 1), dtype=float)

@@ -3,8 +3,7 @@ import numpy as np
 import scipy as sc
 import os
 import re
-
-import util
+from util import graph_processing
 
 def read_graphfile(datadir, dataname, max_nodes=None):
     prefix = os.path.join(datadir, dataname, dataname)
@@ -73,20 +72,20 @@ def read_graphfile(datadir, dataname, max_nodes=None):
     for i in range(1,1+len(adj_list)):
         G=nx.from_edgelist(adj_list[i])
         G.graph['label'] = graph_labels[i-1]
-        for u in util.node_iter(G):
+        for u in graph_processing.node_iter(G):
             if len(node_labels) > 0:
                 node_label_one_hot = [0] * num_unique_node_labels
                 node_label = node_labels[u-1]
                 node_label_one_hot[node_label] = 1
-                util.node_dict(G)[u]['label'] = node_label_one_hot
+                graph_processing.node_dict(G)[u]['label'] = node_label_one_hot
             if len(node_attrs) > 0:
-                util.node_dict(G)[u]['feat'] = node_attrs[u-1]
+                graph_processing.node_dict(G)[u]['feat'] = node_attrs[u-1]
         if len(node_attrs) > 0:
             G.graph['feat_dim'] = node_attrs[0].shape[0]
 
         mapping={}
         it=0
-        for n in util.node_iter(G):
+        for n in graph_processing.node_iter(G):
             mapping[n]=it
             it+=1
             
