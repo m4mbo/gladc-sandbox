@@ -1,4 +1,4 @@
 /datasets
 /pycache
 *.pyc
-/graphs
+/plots

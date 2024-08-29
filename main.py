@@ -11,7 +11,7 @@ from models.graph_autoencoder import *
 import torch
 import torch.nn as nn
 import time
-from loss import *
+from util.loss import *
 from util import *
 from torch.autograd import Variable
 from data.graph_build import GraphBuild

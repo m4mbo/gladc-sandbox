@@ -2,11 +2,15 @@ import sys
 sys.path.append('../')
 
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from data.load_data import read_graphfile
 import numpy as np
+from random import shuffle
+import math 
+
 
 def get_metrics(graphs):
     metrics = []
@@ -39,6 +43,11 @@ def get_metrics(graphs):
             deg_down_quartile = 0
             deg_num_outliers = 0
 
+        # add deg std?
+        # add percentile?
+        # add median, mode?
+        # distance between quartiles?
+        # distance between mean and median?
         metrics.append({
             'min_deg': min_deg,
             'max_deg': max_deg,
@@ -52,68 +61,98 @@ def get_metrics(graphs):
 
     return metrics
 
+def getFeaturesAndLabels(graphs_train, graphs_test):
+
+        # Convert the list of dictionaries to a numpy array for model training
+    X_train = np.array([[m['min_deg'], m['max_deg'], m['deg_avg'], m['deg_num_outliers'], 
+                m['deg_up_quartile'], m['deg_down_quartile'], m['num_edges'], 
+                m['num_nodes']] for m in get_metrics(graphs_train)])
+    X_test = np.array([[m['min_deg'], m['max_deg'], m['deg_avg'], m['deg_num_outliers'], 
+                m['deg_up_quartile'], m['deg_down_quartile'], m['num_edges'], 
+                m['num_nodes']] for m in get_metrics(graphs_test)])
+
+    # Labels
+    y_train = np.array([G.graph['label'] for G in graphs_train])
+    y_test = np.array([G.graph['label'] for G in graphs_test])
+    
+    return X_train, X_test, y_train, y_test
+
+def IF(X_train, X_test, y_train, y_test):
+    if_model = IsolationForest(contamination=0.49, random_state=42, n_estimators=400)
+    if_model.fit(X_train)
+    y_scores = if_model.decision_function(X_test)
+    # Calculate AUC score
+    return roc_auc_score(y_test, y_scores)
+
+def RF(X_train, X_test, y_train, y_test):
+    rf_model = RandomForestClassifier(random_state=42, n_estimators=400)
+    rf_model.fit(X_train, y_train)
+    y_probs = rf_model.predict_proba(X_test)[:, 1]  
+    return roc_auc_score(y_test, y_probs)
+   
+def DT(X_train, X_test, y_train, y_test):
+    dt_model = DecisionTreeClassifier(random_state=42)
+    dt_model.fit(X_train, y_train)
+    y_probs_dt = dt_model.predict_proba(X_test)[:, 1]
+    return roc_auc_score(y_test, y_probs_dt)
+  
+    
 # Load the dataset
 datadir = "../datasets"
 DS = "NCI1"
 max_nodes = 0
 
+if_auc = []
+rf_auc = []
+dt_auc = []
+
 if DS != "NCI1":
     graphs_train = read_graphfile(datadir, DS + '_training', max_nodes=max_nodes)
     graphs_test = read_graphfile(datadir, DS + '_testing', max_nodes=max_nodes)
+
+    for i in range(5):
+
+        print("Trial {}:".format(i+1))   
+
+        train_num=len(graphs_train)
+        all_idx = [idx for idx in range(train_num)]
+        shuffle(all_idx)
+        num_train=math.ceil(1*train_num)
+        train_index = all_idx[:num_train]
+        graphs_train = [graphs_train[i] for i in train_index]
+
+        X_train, X_test, y_train, y_test = getFeaturesAndLabels(graphs_train, graphs_test)
+
+        if_auc.append(IF(X_train, X_test, y_train, y_test))
+        rf_auc.append(RF(X_train, X_test, y_train, y_test))
+        dt_auc.append(DT(X_train, X_test, y_train, y_test))
+    
 else:
+
     graphs = read_graphfile(datadir, DS, max_nodes=max_nodes)
-    graphs_train, graphs_test = train_test_split(graphs, test_size=0.2, random_state=42)
 
-graphs_train_ = [G for G in graphs_train if G.graph['label'] == 0]
+    graphs_label = np.array([G.graph['label'] for G in graphs])
 
-# Convert the list of dictionaries to a numpy array for model training
-X_train = np.array([[m['min_deg'], m['max_deg'], m['deg_avg'], m['deg_num_outliers'], 
-               m['deg_up_quartile'], m['deg_down_quartile'], m['num_edges'], 
-               m['num_nodes']] for m in get_metrics(graphs_train)])
-X_test = np.array([[m['min_deg'], m['max_deg'], m['deg_avg'], m['deg_num_outliers'], 
-               m['deg_up_quartile'], m['deg_down_quartile'], m['num_edges'], 
-               m['num_nodes']] for m in get_metrics(graphs_test)])
+    kfd=StratifiedKFold(n_splits=5, random_state=42, shuffle = True) # 5 fold
 
-# Labels
-y_train = np.array([G.graph['label'] for G in graphs_train])
-y_test = np.array([G.graph['label'] for G in graphs_test])
+    for k, (train_index,test_index) in enumerate(kfd.split(graphs, graphs_label)):
 
-if_model = IsolationForest(contamination=0.1, random_state=42)
-if_model.fit(X_train)
+        graphs_train = [graphs[i] for i in train_index]
+        graphs_test = [graphs[i] for i in test_index]
 
-# Predict anomalies on the test set
-y_pred = if_model.predict(X_test)
-y_pred_mapped = np.where(y_pred == -1, 1, 0)
+        print(f"Fold {k} (train-test split):", len(train_index), len(test_index))
 
-y_scores = if_model.decision_function(X_test)
+        X_train, X_test, y_train, y_test = getFeaturesAndLabels(graphs_train, graphs_test)
 
-# Calculate AUC score
-auc_score_if = roc_auc_score(y_test, y_scores)
-print(f"IF AUC Score: {auc_score_if}")
-
-# Feature importance
-rf_model = RandomForestClassifier(random_state=42)
-rf_model.fit(X_train, y_train)
-
-n_classes = len(rf_model.classes_)
-if n_classes > 1:
-    # Get probability estimates for the positive class
-    y_probs = rf_model.predict_proba(X_test)[:, 1]
-    # Calculate AUC score for Random Forest
-    auc_score_rf = roc_auc_score(y_test, y_probs)
-    print(f"RF AUC Score: {auc_score_rf}")
-else:
-    print("AUC cannot be computed as only one class is present in y_test.")
+        if_auc.append(IF(X_train, X_test, y_train, y_test))
+        rf_auc.append(RF(X_train, X_test, y_train, y_test))
+        dt_auc.append(DT(X_train, X_test, y_train, y_test))
+        
+print(f"IF AUC: {np.mean(if_auc)} +- {np.std(if_auc)}")
+print(f"RF AUC: {np.mean(rf_auc)} +- {np.std(rf_auc)}")
+print(f"DT AUC: {np.mean(dt_auc)} +- {np.std(dt_auc)}")
 
 
-importances = rf_model.feature_importances_
-feature_names = ['min_deg', 'max_deg', 'deg_avg', 'deg_num_outliers', 
-                 'deg_up_quartile', 'deg_down_quartile', 'num_edges', 
-                 'num_nodes']
 
-sorted_idx = np.argsort(importances)
-plt.barh(np.array(feature_names)[sorted_idx], importances[sorted_idx])
-plt.xlabel('Random Forest Feature Importance')
-plt.show()
 
 
